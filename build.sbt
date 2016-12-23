@@ -1,6 +1,6 @@
 lazy val root = (project in file(".")).
   settings(
-    name := "cluster",
+    name := "discrete",
     organization := "com.sasaki"
   )
 
