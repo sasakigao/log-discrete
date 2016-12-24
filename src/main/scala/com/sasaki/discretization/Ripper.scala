@@ -31,7 +31,7 @@ object Ripper {
 
 	// Used constants
 	val lookupFilePartitions = 1
-	val teamMapCodePartitions = 20
+	val teamMapCodePartitions = 50
 	val codeCounterPartitions = 1
 	val isPositive = 1
 	val isNegative = 0
@@ -73,7 +73,7 @@ object Ripper {
 			.mapValues(values => new RecordUnit(values._1, values._2, values._3))
 			.persist()
 		lineRDD.unpersist()
-		LogHelper.log(validLineRDD.first, "validLineRDD")
+		// LogHelper.log(validLineRDD.first, "validLineRDD")
 		// LogHelper.log(validLineRDD.count, "validLineRDD count")
 		// val codeCounter = validLineRDD.map(_._2.motionCode).countByValue.toList.sortBy(-_._2)
 		// sc.parallelize(codeCounter, codeCounterPartitions).saveAsTextFile(codeCounterHDFS)
@@ -84,7 +84,7 @@ object Ripper {
 		 */
 		val roleRDD = validLineRDD.groupByKey.
 			mapValues(_.toSeq.sortBy(_.timestamp)).persist()
-		LogHelper.log(roleRDD.first, "roleRDD")
+		// LogHelper.log(roleRDD.first, "roleRDD")
 		// LogHelper.log(roleRDD.count, "roleRDD count")
 
 		/**
@@ -96,14 +96,16 @@ object Ripper {
 			.filter{ case (_, count) => count > 1 && count < 7}
 		validLineRDD.unpersist()
 		val teamMapCodeBc = sc.broadcast(teamMapCode)
-		LogHelper.log(teamMapCode.take(10), "teamMapCode")
-		sc.parallelize(teamMapCode.toList, teamMapCodePartitions).saveAsTextFile(mapCounterHDFS)
+		// LogHelper.log(teamMapCode.take(10), "teamMapCode")
+		// LogHelper.log(teamMapCode.size, "teamMapCode count")
+		// sc.parallelize(teamMapCode.toList, teamMapCodePartitions).saveAsTextFile(mapCounterHDFS)
 		
 		/**
 		 * Seperate the seqs into personal one and team one
 		 * Each one contains the pairs of start and end time point
+		 * role -> pairs(start, end)
 		 */
-		val teamTimeScopes = roleRDD.mapValues{ assemblies =>
+		val teamTimeScopesRDD = roleRDD.mapValues{ assemblies =>
 			val timingEnterMap = assemblies.filter(_.codeMatch(enterMapCode))
 				.filter(_.mapMatch(teamMapCodeBc.value))
 			val timingEnterMapSize = timingEnterMap.size
@@ -126,23 +128,21 @@ object Ripper {
 			} else {
 				None
 			}
-		}.collect.toMap
-		val teamTimeScopesBc = sc.broadcast(teamTimeScopes)
-		LogHelper.log(teamTimeScopes.head, "teamTimeScopes")
+		}
 
 		/**
 		 * Use the time pairs to split each seqs
 		 */
-		val partitionedRoleRDD = roleRDD.map{ case (role, assemblies) =>
-			val pairs = (teamTimeScopesBc.value)(role)
-			if (pairs != None) {                                                    // this role has team parts
-				val (teamParts, personalParts) = assemblies.partition(_.withinScopePairs(pairs.get))
+		val scopesJoinLinesRDD = roleRDD.join(teamTimeScopesRDD)
+		val partitionedRoleRDD = scopesJoinLinesRDD.map{ case (role, (assemblies, scopePairs)) =>
+			if (scopePairs != None) {                                                    // this role has team parts
+				val (teamParts, personalParts) = assemblies.partition(_.withinScopePairs(scopePairs.get))
 				(role, (Some(teamParts), personalParts))
 			} else {
 				(role, (None, assemblies))
 			}
 		}.persist()
-		// LogHelper.log(partitionedRoleRDD.count, "partitionedRoleRDD count")
+		LogHelper.log(partitionedRoleRDD.count, "partitionedRoleRDD count")
 
 		
 		val personalRDD = partitionedRoleRDD.mapValues(_._2).persist()
@@ -154,6 +154,7 @@ object Ripper {
 		LogHelper.log(teamRDD.count, "teamRDD count")
 
 		/**
+		 * Split by grades
 		 * (role, grade) -> seqs
 		 */
 		val roleGradeRDD = personalRDD.map{ case (role, seqs) =>
