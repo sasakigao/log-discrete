@@ -8,7 +8,7 @@ import com.sasaki.utils.TimeUtils
 class RecordUnit(val timestamp : Long, val motionCode : String, val parameters : String) {
 
 	override def toString() = {
-		s"timestamp -> $timestamp, motionCode -> $motionCode, parameters -> $parameters"
+		s"$timestamp@$motionCode@$parameters"
 	}
 
 	def codeMatch(code : String) : Boolean = {

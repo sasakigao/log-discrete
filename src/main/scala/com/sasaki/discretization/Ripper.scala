@@ -1,12 +1,12 @@
 package com.sasaki.discretization
 
 import scala.collection.mutable._
-import scala.collection.Iterable
 
 import org.apache.spark.{SparkConf, SparkContext, HashPartitioner}
 import org.apache.spark.SparkContext._
 import org.apache.spark.storage.StorageLevel
 import org.apache.spark.rdd.RDD
+import org.apache.spark.sql.{SQLContext, Row}
 
 import com.sasaki.utils._
 
@@ -33,8 +33,8 @@ object Ripper {
 	val lookupFilePartitions = 1
 	val teamMapCodePartitions = 50
 	val codeCounterPartitions = 1
-	val isPositive = 1
-	val isNegative = 0
+	val gradeIndex = 2
+	val mapIndex = 13
 	val upgradeCode = "5300125"
 	val enterMapCode = "5300055"
 	val leaveMapCode = "5300060"
@@ -44,6 +44,7 @@ object Ripper {
 	  	confSpark.set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
 	  	confSpark.registerKryoClasses(Array(classOf[Xtractor], classOf[RecordUnit], classOf[RecordOption]))
   		val sc = new SparkContext(confSpark)
+		val sqlContext = new SQLContext(sc)
   		sc.setLogLevel("WARN")
 
 		val opeLookup = sc.textFile(motionsLookupFile, lookupFilePartitions).collect
@@ -63,7 +64,8 @@ object Ripper {
 			val player = extractor.roleIdXtract(code, opeLookupBc.value)
 			val parameters = extractor.paramsXtract()
 			new RecordOption(player, timestamp, code, parameters)
-		}.persist()
+		}
+		.persist()
 		// LogHelper.log(lineRDD.count, "lineRDD count")
 
 		/**
@@ -80,10 +82,17 @@ object Ripper {
 		 
 		/**
 		 * Pack the RecordUnit of one role into a seq and sort it by time.
-		 * (role -> seqs)
+		 * (role -> Seq[RecordUnit])
 		 */
-		val roleRDD = validLineRDD.groupByKey.
-			mapValues(_.toSeq.sortBy(_.timestamp)).persist()
+		val roleRDD = validLineRDD.combineByKey(
+			(v : RecordUnit) => Seq(v),
+			(c : Seq[RecordUnit], v : RecordUnit) => c :+ v,
+			(c1 : Seq[RecordUnit], c2 : Seq[RecordUnit]) => c1 ++ c2
+		).mapValues(_.toSeq.sortBy(_.timestamp))
+		.persist()
+
+		// val roleRDD = validLineRDD.groupByKey.
+		// 	mapValues(_.toSeq.sortBy(_.timestamp)).persist()
 		// LogHelper.log(roleRDD.first, "roleRDD")
 		// LogHelper.log(roleRDD.count, "roleRDD count")
 
@@ -141,52 +150,72 @@ object Ripper {
 			} else {
 				(role, (None, assemblies))
 			}
-		}.persist()
-		LogHelper.log(partitionedRoleRDD.count, "partitionedRoleRDD count")
+		}
+		.persist()
+		// LogHelper.log(partitionedRoleRDD.count, "partitionedRoleRDD count")
 
 		
-		val personalRDD = partitionedRoleRDD.mapValues(_._2).persist()
-		val teamRDD = partitionedRoleRDD.mapValues(_._1).filter(_._2 != None).mapValues(_.get).persist()
+		val personalRDD = partitionedRoleRDD.mapValues(_._2)
+			.persist()
+		val teamRDD = partitionedRoleRDD.mapValues(_._1).filter(_._2 != None).mapValues(_.get)
+			.persist()
 		partitionedRoleRDD.unpersist()
-		LogHelper.log(personalRDD.first, "personalRDD")
-		LogHelper.log(personalRDD.count, "personalRDD count")
-		LogHelper.log(teamRDD.first, "teamRDD")
-		LogHelper.log(teamRDD.count, "teamRDD count")
+		// LogHelper.log(personalRDD.first, "personalRDD")
+		// LogHelper.log(personalRDD.count, "personalRDD count")
+		// LogHelper.log(teamRDD.first, "teamRDD")
+		// LogHelper.log(teamRDD.count, "teamRDD count")
 
 		/**
-		 * Split by grades
+		 * Split personal data by grades
 		 * (role, grade) -> seqs
 		 */
-		val roleGradeRDD = personalRDD.map{ case (role, seqs) =>
-			val upgradeIndex = (0 until seqs.size).filter(seqs(_).codeMatch(upgradeCode))
-			if (upgradeIndex.size > 1) {                                             // only those upgrade more than once are considered
-				val splits = upgradeIndex.sliding(2, 1).map{ headAndToe =>
-					seqs.slice(headAndToe.head, headAndToe.last)
-				}
-				val result = splits.map{ split =>
-					val grade = split.head.parameters.split(",,")(1).toInt
-					((role, grade), split)
-				}
-				Some(result)
-			} else {
-				None
-			}
-		}.filter(_ != None).map(_.get)
-		.flatMap(x => x)
-		.persist()
+		val roleGradeRDD = personalRDD.map(currySplit(upgradeCode, gradeIndex)(_))
+			.filter(_ != None).map(_.get)
+			.flatMap(x => x)
+			.persist()
 		personalRDD.unpersist()
-		LogHelper.log(roleGradeRDD.first, "roleGradeRDD")
-		LogHelper.log(roleGradeRDD.count, "roleGradeRDD count")
+		// LogHelper.log(roleGradeRDD.first, "roleGradeRDD")
+		// LogHelper.log(roleGradeRDD.count, "roleGradeRDD count")
 
+		/**
+		 * Split person in team data by map id
+		 * (role, map) -> seqs
+		 */
+		val roleGroupRDD = teamRDD.map(currySplit(enterMapCode, mapIndex)(_))
+			.filter(_ != None).map(_.get)
+			.flatMap(x => x)
+			.persist()
+		teamRDD.unpersist()
+		// LogHelper.log(roleGroupRDD.first, "roleGroupRDD")
+		// LogHelper.log(roleGroupRDD.count, "roleGroupRDD count")
 
-		// roleGradeRDD.saveAsObjectFile(personalDataHDFS)
-		// teamRDD.saveAsObjectFile(teamDataHDFS)
-		roleGradeRDD.saveAsTextFile(personalDataHDFS)
-		teamRDD.saveAsTextFile(teamDataHDFS)
+		StoreFormat.saveAsJSON(roleGradeRDD, personalDataHDFS, sqlContext)
+		StoreFormat.saveAsJSON(roleGroupRDD, teamDataHDFS, sqlContext)
 
 		roleGradeRDD.unpersist()
 		teamRDD.unpersist()
     		sc.stop()
+  	}
+
+  	/**
+  	 * A curry function which relies on code and param index for splitting.
+  	 */
+  	def currySplit(targetEventCode : String, paramIndex : Int)
+  			(roleInfo : (String, scala.Seq[RecordUnit])) = {
+  		val (role, seqs) = roleInfo
+  		val splitIndex = (0 until seqs.size).filter(seqs(_).codeMatch(targetEventCode))
+		if (splitIndex.size > 1) {                                             // only those appear more than once are considered
+			val splits = splitIndex.sliding(2, 1).map{ headAndToe =>
+				seqs.slice(headAndToe.head, headAndToe.last)
+			}.toSeq
+			val result = splits.map{ split =>
+				val mark = split.head.parameters.split(",")(paramIndex)
+				Row(role, mark, split.map(_.toString))
+			}
+			Some(result)
+		} else {
+			None
+		}
   	}
 
 }
