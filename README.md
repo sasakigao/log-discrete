@@ -12,11 +12,11 @@ try/catch block to process exception. Holly scala!
 # Store consideration
 In order to keep a friendly store format and reduce the work of parsing, 
 I considered 3 ways to solve this.
-1. **text**: Text file dosen't need a lot of work on saving. But correspondingly reading from HDFS
+* **text**: Text file dosen't need a lot of work on saving. But correspondingly reading from HDFS
 costs relatively large efforts to parse the string, due to its raw object form.
-2. **SequenceFile**: Hadoop provides this format for serialization. Parsing is saved under this 
+* **SequenceFile**: Hadoop provides this format for serialization. Parsing is saved under this 
 situation but the files persisted are unfriendly to read.
-3. **JSON**: This one is finally chosen, for the natural support from SparkSQL. So I spare some time
+* **JSON**: This one is finally chosen, for the natural support from SparkSQL. So I spare some time
 on a rdd-to-dataframe transformation. The loading process later on also needs to do a 
 dataframe-to-rdd work. 
 I prefer to draw logics on RDD, rather than DateFrame as a SQL interface.
