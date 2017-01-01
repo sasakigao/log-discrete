@@ -21,13 +21,14 @@ object Ripper {
 	// val playerLogHDFS = "hdfs:///netease/ver1/datum/labelled/"
 	val playerLogHDFS = "hdfs:///netease/ver2/datum/"
     	// Motions lookup file to read
-	val motionsLookupFile = "hdfs:///netease/ver1/datum/operations-user"
+	val motionsLookupFile = "hdfs:///netease/ver2/operations-user"
 
 	// Write to
 	val personalDataHDFS = "hdfs:///netease/ver2/gen/personal/"
 	val teamDataHDFS = "hdfs:///netease/ver2/gen/team/"
 	val codeCounterHDFS = "hdfs:///netease/ver2/gen/code-counter/"
 	val mapCounterHDFS = "hdfs:///netease/ver2/gen/map-counter/"
+	val invalidDataHDFS = "hdfs:///netease/ver2/gen/invalid/"
 
 	// Used constants
 	val lookupFilePartitions = 1
@@ -42,41 +43,56 @@ object Ripper {
 	def main(args: Array[String]) = {
 	  	val confSpark = new SparkConf().setAppName(appName)
 	  	confSpark.set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
-	  	confSpark.registerKryoClasses(Array(classOf[Xtractor], classOf[RecordUnit], classOf[RecordOption]))
+	  	confSpark.registerKryoClasses(Array(classOf[Xtractor], classOf[RecordUnit], classOf[RecordEither]))
   		val sc = new SparkContext(confSpark)
 		val sqlContext = new SQLContext(sc)
   		sc.setLogLevel("WARN")
 
-		val opeLookup = sc.textFile(motionsLookupFile, lookupFilePartitions).collect
+		val opeLookup = sc.textFile(motionsLookupFile, lookupFilePartitions)
 			.map{x => val f = x.split(","); (f(0), f(1))}
-			.toMap
+			.groupByKey
+			.collectAsMap
+			.mapValues(_.map(_.toInt).toSeq)
 		val opeLookupBc = sc.broadcast(opeLookup)
 
 		val rawDatum = sc.textFile(playerLogHDFS)
 		
 		/**
-		 * Extract the fields as options
+		 * Extract the fields as options.
+		 * Per line might generate two records for it involves two roles.
 		 */
-		val lineRDD = rawDatum.map{ line =>
-			val extractor = new Xtractor(line)
+		val lineRDD = rawDatum.flatMap{ line =>
+			val extractor = new Xtractor(line.trim)
 			val code = extractor.motionCodeXtract()
 			val timestamp = extractor.timestampXtract()
-			val player = extractor.roleIdXtract(code, opeLookupBc.value)
 			val parameters = extractor.paramsXtract()
-			new RecordOption(player, timestamp, code, parameters)
+			val players = extractor.roleIdXtract(code, parameters, opeLookupBc.value)
+			players.map(p => new RecordEither(p, timestamp, code, parameters))
 		}
 		.persist()
-		// LogHelper.log(lineRDD.count, "lineRDD count")
+		LogHelper.log(lineRDD.count, "lineRDD count")
 
+		/**
+		 * Retrieve each invalid type and store.
+		 */
+		val roleInvalidLineRDD = lineRDD.filter(_.isRoleInvalid)
+		val timeInvalidLineRDD = lineRDD.filter(_.isTimeInvalid)
+		val codeInvalidLineRDD = lineRDD.filter(_.isMotionInvalid)
+		val paramsInvalidLineRDD = lineRDD.filter(_.isParamsInvalid)
+		roleInvalidLineRDD.coalesce(10, false).saveAsTextFile(invalidDataHDFS + "role")
+		timeInvalidLineRDD.coalesce(10, false).saveAsTextFile(invalidDataHDFS + "time")
+		codeInvalidLineRDD.coalesce(10, false).saveAsTextFile(invalidDataHDFS + "code")
+		paramsInvalidLineRDD.coalesce(10, false).saveAsTextFile(invalidDataHDFS + "params")
+		
 		/**
 		 * Exclude the bad records and repack them as RecordUnit
 		 */
-		val validLineRDD = lineRDD.map(_.toKV()).filter(_ != None).map(_.get)
+		val validLineRDD = lineRDD.filter(_.isValid).map(_.toKV())
 			.mapValues(values => new RecordUnit(values._1, values._2, values._3))
 			.persist()
 		lineRDD.unpersist()
 		// LogHelper.log(validLineRDD.first, "validLineRDD")
-		// LogHelper.log(validLineRDD.count, "validLineRDD count")
+		LogHelper.log(validLineRDD.count, "validLineRDD count")
 		// val codeCounter = validLineRDD.map(_._2.motionCode).countByValue.toList.sortBy(-_._2)
 		// sc.parallelize(codeCounter, codeCounterPartitions).saveAsTextFile(codeCounterHDFS)
 		 
@@ -94,7 +110,7 @@ object Ripper {
 		// val roleRDD = validLineRDD.groupByKey.
 		// 	mapValues(_.toSeq.sortBy(_.timestamp)).persist()
 		// LogHelper.log(roleRDD.first, "roleRDD")
-		// LogHelper.log(roleRDD.count, "roleRDD count")
+		LogHelper.log(roleRDD.count, "roleRDD count")
 
 		/**
 		 * Retrieve the map codes of team tasks
@@ -106,7 +122,7 @@ object Ripper {
 		validLineRDD.unpersist()
 		val teamMapCodeBc = sc.broadcast(teamMapCode)
 		// LogHelper.log(teamMapCode.take(10), "teamMapCode")
-		// LogHelper.log(teamMapCode.size, "teamMapCode count")
+		LogHelper.log(teamMapCode.size, "teamMapCode count")
 		// sc.parallelize(teamMapCode.toList, teamMapCodePartitions).saveAsTextFile(mapCounterHDFS)
 		
 		/**
@@ -153,17 +169,16 @@ object Ripper {
 		}
 		.persist()
 		// LogHelper.log(partitionedRoleRDD.count, "partitionedRoleRDD count")
-
 		
-		val personalRDD = partitionedRoleRDD.mapValues(_._2)
+		val personalRDD = partitionedRoleRDD.mapValues(_._2).filter(_._2.size >0)
 			.persist()
 		val teamRDD = partitionedRoleRDD.mapValues(_._1).filter(_._2 != None).mapValues(_.get)
 			.persist()
 		partitionedRoleRDD.unpersist()
 		// LogHelper.log(personalRDD.first, "personalRDD")
-		// LogHelper.log(personalRDD.count, "personalRDD count")
+		LogHelper.log(personalRDD.count, "personalRDD count")
 		// LogHelper.log(teamRDD.first, "teamRDD")
-		// LogHelper.log(teamRDD.count, "teamRDD count")
+		LogHelper.log(teamRDD.count, "teamRDD count")
 
 		/**
 		 * Split personal data by grades
@@ -175,7 +190,7 @@ object Ripper {
 			.persist()
 		personalRDD.unpersist()
 		// LogHelper.log(roleGradeRDD.first, "roleGradeRDD")
-		// LogHelper.log(roleGradeRDD.count, "roleGradeRDD count")
+		LogHelper.log(roleGradeRDD.count, "roleGradeRDD count")
 
 		/**
 		 * Split person in team data by map id
@@ -187,7 +202,7 @@ object Ripper {
 			.persist()
 		teamRDD.unpersist()
 		// LogHelper.log(roleGroupRDD.first, "roleGroupRDD")
-		// LogHelper.log(roleGroupRDD.count, "roleGroupRDD count")
+		LogHelper.log(roleGroupRDD.count, "roleGroupRDD count")
 
 		StoreFormat.saveAsJSON(roleGradeRDD, personalDataHDFS, sqlContext)
 		StoreFormat.saveAsJSON(roleGroupRDD, teamDataHDFS, sqlContext)
