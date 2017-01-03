@@ -6,9 +6,8 @@ import collection.Map
 
 class Xtractor(val logLine : String) {
 
-	
 	def motionCodeXtract() : Either[(Int, String), String] = {
-		val pattern = """(PLAYER|LOGIN|SCRIPT|SALE)\|\[[0-9]{7}""".r             // PLAYER or LOGIN or SCRIPT or SALE
+		val pattern = """INFO\|[A-Z]{1,10}\|\[[0-9]{7}""".r       // judged by INFO
   		val matchRes = pattern.findFirstIn(logLine)
   		if (matchRes != None) 
   			Right(matchRes.get.split('[').last)
@@ -26,7 +25,7 @@ class Xtractor(val logLine : String) {
 	}
 
 	def paramsXtract() : Either[(Int, String), String] = {
-		val pattern = """(PLAYER|LOGIN|SCRIPT|SALE)\|\[[0-9]{7}\].*""".r
+		val pattern = """INFO\|[A-Z]{1,10}\|\[[0-9]{7}\].*""".r
   		val matchRes = pattern.findFirstIn(logLine)
   		if (matchRes != None) 
   			Right(matchRes.get.split(']').last.trim) 
@@ -71,11 +70,11 @@ class Xtractor(val logLine : String) {
 		}
 	}
 
-	def spCodeHandle(code : String, params : String) = {
+	def spCodeHandle(code : String, params : String) : Seq[String] = {
 		code match {
 			case "5300210" => 
 				val paramsArr = params.split(",,")
-				if (logLine.split("[").size == 5) 
+				if (logLine.split("\\[").size == 5) 
 					Seq(paramsArr.head) 
 				else if (paramsArr.size > 2)
 					Seq(paramsArr(1))
@@ -84,7 +83,7 @@ class Xtractor(val logLine : String) {
 			case "5300510" => 
 				val p = """playerId=[0-9]{7,12}""".r
 				val res = p.findFirstIn(params)
-				if (p != None)
+				if (res != None)
   					Seq(res.get.split("=").last)
   				else
   					Seq(Xtractor.errCode5300510.toString)

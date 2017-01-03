@@ -73,16 +73,20 @@ object Ripper {
 		LogHelper.log(lineRDD.count, "lineRDD count")
 
 		/**
-		 * Retrieve each invalid type and store.
+		 * Invalid role contains all invalid code and invalid params
+		 * and non-dependent error type of considered role. So 
+		 * only need to store invalid role.
 		 */
-		val roleInvalidLineRDD = lineRDD.filter(_.isRoleInvalid)
-		val timeInvalidLineRDD = lineRDD.filter(_.isTimeInvalid)
-		val codeInvalidLineRDD = lineRDD.filter(_.isMotionInvalid)
-		val paramsInvalidLineRDD = lineRDD.filter(_.isParamsInvalid)
-		roleInvalidLineRDD.coalesce(10, false).saveAsTextFile(invalidDataHDFS + "role")
-		timeInvalidLineRDD.coalesce(10, false).saveAsTextFile(invalidDataHDFS + "time")
-		codeInvalidLineRDD.coalesce(10, false).saveAsTextFile(invalidDataHDFS + "code")
-		paramsInvalidLineRDD.coalesce(10, false).saveAsTextFile(invalidDataHDFS + "params")
+		val roleInvalidLineRDD = lineRDD.filter(_.isRoleInvalid).persist()
+		LogHelper.log(roleInvalidLineRDD.count, "roleInvalidLineRDD count")
+		roleInvalidLineRDD. coalesce(10, false).saveAsTextFile(invalidDataHDFS + "role/")
+		roleInvalidLineRDD.unpersist()
+
+		/**
+		 * Count lines involve unexpected roles
+		 */
+		val roleUnexpectedRDD = lineRDD.filter(_.isRoleUnexpected)
+		LogHelper.log(roleUnexpectedRDD.count, "roleUnexpectedRDD count")
 		
 		/**
 		 * Exclude the bad records and repack them as RecordUnit
@@ -131,11 +135,9 @@ object Ripper {
 		 * role -> pairs(start, end)
 		 */
 		val teamTimeScopesRDD = roleRDD.mapValues{ assemblies =>
-			val timingEnterMap = assemblies.filter(_.codeMatch(enterMapCode))
-				.filter(_.mapMatch(teamMapCodeBc.value))
+			val timingEnterMap = assemblies.filter(_.mapMatch(enterMapCode, teamMapCodeBc.value))
 			val timingEnterMapSize = timingEnterMap.size
-			val timingLeaveMap = assemblies.filter(_.codeMatch(leaveMapCode))
-				.filter(_.mapMatch(teamMapCodeBc.value))
+			val timingLeaveMap = assemblies.filter(_.mapMatch(leaveMapCode, teamMapCodeBc.value))
 			val timingLeaveMapSize = timingLeaveMap.size
 			if (timingEnterMapSize * timingLeaveMapSize > 0) {          // start before a enter
 				if (timingEnterMap.head.timestamp > timingLeaveMap.head.timestamp) {

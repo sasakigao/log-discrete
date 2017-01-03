@@ -16,8 +16,12 @@ class RecordEither(val role : Either[(Int, String), String],
 	val isMotionInvalid : Boolean = motionCode.isLeft
 	val isParamsInvalid : Boolean = parameters.isLeft
 
-	val isRoleInvalid : Boolean = motionCode.isLeft &&
-		 motionCode.left.get._1 != Xtractor.errCodeElse
+	// Use two variables to describe invalid role.
+	// One is caused by expected normal error while the other one by expected.
+	val isRoleInvalid : Boolean = role.isLeft &&
+		 role.left.get._1 != Xtractor.errCodeElse
+	val isRoleUnexpected : Boolean = role.isLeft &&
+		 role.left.get._1 == Xtractor.errCodeElse
 
 	override def toString() = {
 		if (isValid) {

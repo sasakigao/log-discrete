@@ -12,11 +12,14 @@ class RecordUnit(val timestamp : Long, val motionCode : String, val parameters :
 	}
 
 	def codeMatch(code : String) : Boolean = {
-		code == motionCode		
+		code == motionCode
 	}
 
-	def mapMatch(mapLookup : collection.Map[String, Long]) : Boolean = {
-		mapLookup contains parameters.split(",,").last
+	/**
+	 * Tell if code is matched as well as the mapid is contained
+	 */
+	def mapMatch(code : String, mapLookup : collection.Map[String, Long]) : Boolean = {
+		codeMatch(code) && mapLookup.contains(parameters.split(",,").last)
 	}
 
 	def withinScopePairs(pairs : IndexedSeq[(Long, Long)]) : Boolean = {
