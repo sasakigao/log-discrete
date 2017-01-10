@@ -18,9 +18,10 @@ class RecordEither(val role : Either[(Int, String), String],
 
 	// Use two variables to describe invalid role.
 	// One is caused by expected normal error while the other one by expected.
-	val isRoleInvalid : Boolean = role.isLeft &&
-		 role.left.get._1 != Xtractor.errCodeElse
-	val isRoleUnexpected : Boolean = role.isLeft &&
+	val isRoleInvalid : Boolean = role.isLeft
+	val isRoleDependentInvalid : Boolean = role.isLeft &&
+		 role.left.get._1 == Xtractor.dependentErrCode
+	val isRoleUnexpected : Boolean = role.isLeft &&               // maybe the largest one
 		 role.left.get._1 == Xtractor.errCodeElse
 
 	override def toString() = {
@@ -35,7 +36,7 @@ class RecordEither(val role : Either[(Int, String), String],
 	}
 
 	/**
-	 * Transform if valid. Or throw exception.
+	 * Transform if valid. Or throw a exception.
 	 */
 	def toKV() = {
 		if (isValid)

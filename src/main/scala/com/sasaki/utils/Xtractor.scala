@@ -34,7 +34,10 @@ class Xtractor(val logLine : String) {
 	}
 
 	/**
-	 * Role depends on both code and parameters.
+	 * Depending on valid code and params split in the 1st if/else.
+	 * Then whether the code is included in the list is the 2nd layer.
+	 * If included, whether is sp split in the 3rd layer.
+	 * Moreover, role exception includes params and code one.
 	 */
 	def roleIdXtract(codeMaybe : Either[(Int, String), String], 
 			paramsMaybe : Either[(Int, String), String], 
@@ -57,7 +60,7 @@ class Xtractor(val logLine : String) {
 				val knownErrPat = """^[0-9]{3}$""".r
 				val either : Either[(Int, String), String] = 
 					if (normalRes != None) {
-						Right(normalRes.get) 
+						Right(normalRes.get.toLong.toString)           // handle the case like "0123456"
 					} else if (knownErrPat.findFirstIn(role) != None) {
 						Left((role.toInt, logLine))
 					} else {

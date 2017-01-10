@@ -5,10 +5,16 @@ import java.text.ParseException
 
 import com.sasaki.utils.TimeUtils
 
-class RecordUnit(val timestamp : Long, val motionCode : String, val parameters : String) {
+class RecordUnit(val timestamp : Long, 
+		val motionCode : String, 
+		val parameters : String) {
 
 	override def toString() = {
 		s"$timestamp@$motionCode@$parameters"
+	}
+
+	def firstEnterMap : Boolean = {
+		motionCode == Ripper.enterMapCode && parameters.split("@").head.trim == "1"
 	}
 
 	def codeMatch(code : String) : Boolean = {
@@ -23,7 +29,7 @@ class RecordUnit(val timestamp : Long, val motionCode : String, val parameters :
 	}
 
 	def withinScopePairs(pairs : IndexedSeq[(Long, Long)]) : Boolean = {
-		pairs.filter(x => timestamp > x._1 && timestamp < x._2).size > 0
+		pairs.filter(x => timestamp >= x._1 && timestamp <= x._2).size > 0
 	}
 
 }

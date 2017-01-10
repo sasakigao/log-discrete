@@ -56,12 +56,13 @@ object Ripper {
 		val opeLookupBc = sc.broadcast(opeLookup)
 
 		val rawDatum = sc.textFile(playerLogHDFS)
+		// .zipWithIndex
 		
 		/**
 		 * Extract the fields as options.
 		 * Per line might generate two records for it involves two roles.
 		 */
-		val lineRDD = rawDatum.flatMap{ line =>
+		val lineRDD = rawDatum.flatMap{ case line =>
 			val extractor = new Xtractor(line.trim)
 			val code = extractor.motionCodeXtract()
 			val timestamp = extractor.timestampXtract()
@@ -73,20 +74,9 @@ object Ripper {
 		LogHelper.log(lineRDD.count, "lineRDD count")
 
 		/**
-		 * Invalid role contains all invalid code and invalid params
-		 * and non-dependent error type of considered role. So 
-		 * only need to store invalid role.
+		 * Summarize 3 exception types of role's extraction.
 		 */
-		val roleInvalidLineRDD = lineRDD.filter(_.isRoleInvalid).persist()
-		LogHelper.log(roleInvalidLineRDD.count, "roleInvalidLineRDD count")
-		roleInvalidLineRDD. coalesce(10, false).saveAsTextFile(invalidDataHDFS + "role/")
-		roleInvalidLineRDD.unpersist()
-
-		/**
-		 * Count lines involve unexpected roles
-		 */
-		val roleUnexpectedRDD = lineRDD.filter(_.isRoleUnexpected)
-		LogHelper.log(roleUnexpectedRDD.count, "roleUnexpectedRDD count")
+		roleInvaldAnalysis(lineRDD)
 		
 		/**
 		 * Exclude the bad records and repack them as RecordUnit
@@ -95,10 +85,10 @@ object Ripper {
 			.mapValues(values => new RecordUnit(values._1, values._2, values._3))
 			.persist()
 		lineRDD.unpersist()
-		// LogHelper.log(validLineRDD.first, "validLineRDD")
+		LogHelper.log(validLineRDD.first, "validLineRDD")
 		LogHelper.log(validLineRDD.count, "validLineRDD count")
-		// val codeCounter = validLineRDD.map(_._2.motionCode).countByValue.toList.sortBy(-_._2)
-		// sc.parallelize(codeCounter, codeCounterPartitions).saveAsTextFile(codeCounterHDFS)
+		val codeCounter = validLineRDD.map(_._2.motionCode).countByValue.toList.sortBy(-_._2)
+		sc.parallelize(codeCounter, codeCounterPartitions).saveAsTextFile(codeCounterHDFS)
 		 
 		/**
 		 * Pack the RecordUnit of one role into a seq and sort it by time.
@@ -111,10 +101,10 @@ object Ripper {
 		).mapValues(_.toSeq.sortBy(_.timestamp))
 		.persist()
 
-		// val roleRDD = validLineRDD.groupByKey.
-		// 	mapValues(_.toSeq.sortBy(_.timestamp)).persist()
 		// LogHelper.log(roleRDD.first, "roleRDD")
 		LogHelper.log(roleRDD.count, "roleRDD count")
+		// val target = roleRDD.filter(_._1 == "2195310412").first
+		// LogHelper.log(target, "target")
 
 		/**
 		 * Retrieve the map codes of team tasks
@@ -220,8 +210,9 @@ object Ripper {
   	def currySplit(targetEventCode : String, paramIndex : Int)
   			(roleInfo : (String, scala.Seq[RecordUnit])) = {
   		val (role, seqs) = roleInfo
-  		val splitIndex = (0 until seqs.size).filter(seqs(_).codeMatch(targetEventCode))
-		if (splitIndex.size > 1) {                                             // only those appear more than once are considered
+  		val splitIndex = (0 until seqs.size).filter(x => seqs(x).codeMatch(targetEventCode) || seqs(x).firstEnterMap)
+		// only those appear more than once are considered
+		if (splitIndex.size > 1) {
 			val splits = splitIndex.sliding(2, 1).map{ headAndToe =>
 				seqs.slice(headAndToe.head, headAndToe.last)
 			}.toSeq
@@ -233,6 +224,18 @@ object Ripper {
 		} else {
 			None
 		}
+  	}
+
+  	def roleInvaldAnalysis(lineRDD : RDD[RecordEither]) = {
+  		val roleInvalidRDD = lineRDD.filter(_.isRoleInvalid).persist()
+		val roleDependentInvalidRDD = lineRDD.filter(_.isRoleDependentInvalid).persist()
+		val roleUnexpectedRDD = lineRDD.filter(_.isRoleUnexpected).persist()
+		LogHelper.log(roleInvalidRDD.count, "roleInvalidRDD count")
+		LogHelper.log(roleDependentInvalidRDD.count, "roleDependentInvalidRDD count")
+		LogHelper.log(roleUnexpectedRDD.count, "roleUnexpectedRDD count")
+		roleUnexpectedRDD.takeSample(false, 100, 11L).foreach(LogHelper.log(_, "roleUnexpectedRDD 100"))
+		roleDependentInvalidRDD.coalesce(10, false).saveAsTextFile(invalidDataHDFS + "role-dep/")
+		roleUnexpectedRDD.coalesce(10, false).saveAsTextFile(invalidDataHDFS + "role-unexp/")
   	}
 
 }
