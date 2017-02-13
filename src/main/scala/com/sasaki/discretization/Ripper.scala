@@ -24,15 +24,15 @@ object Ripper {
 	val motionsLookupFile = "hdfs:///netease/ver2/operations-user"
 
 	// Write to
-	val personalDataHDFS = "hdfs:///netease/ver2/gen/personal/"
-	val teamDataHDFS = "hdfs:///netease/ver2/gen/team/"
-	val codeCounterHDFS = "hdfs:///netease/ver2/gen/code-counter/"
-	val mapCounterHDFS = "hdfs:///netease/ver2/gen/map-counter/"
-	val invalidDataHDFS = "hdfs:///netease/ver2/gen/invalid/"
+	val personalDataHDFS = "hdfs:///netease/ver2/gen/2/personal/"
+	val teamDataHDFS = "hdfs:///netease/ver2/gen/2/team/"
+	val codeCounterHDFS = "hdfs:///netease/ver2/gen/2/code-counter/"
+	val mapCounterHDFS = "hdfs:///netease/ver2/gen/2/map-counter/"
+	val invalidDataHDFS = "hdfs:///netease/ver2/gen/2/invalid/"
 
 	// Used constants
 	val lookupFilePartitions = 1
-	val teamMapCodePartitions = 50
+	val teamMapCodePartitions = 20
 	val codeCounterPartitions = 1
 	val gradeIndex = 2
 	val mapIndex = 13
@@ -77,7 +77,7 @@ object Ripper {
 		val validLineRDD = validate(lineRDD)
 		lineRDD.unpersist()
 		validLineRDD.persist()
-		LogHelper.log(validLineRDD.first, "validLineRDD")
+		// LogHelper.log(validLineRDD.first, "validLineRDD")
 		LogHelper.log(validLineRDD.count, "validLineRDD count")
 
 		/**
@@ -107,9 +107,8 @@ object Ripper {
 		val teamMapCodeBc = sc.broadcast(teamMapCode)
 		
 		/**
-		 * Seperate the seqs into personal one and team one
-		 * Each one contains the pairs of start and end time point
-		 * role -> Seq(start, end)
+		 * Bipartition each role's seq into two parts, personal and team.
+		 * Personal part is a whole seq, but the team part is already grouped by maps.
 		 */
 		val partitionedRoleRDD = bipartition(roleRDD, teamMapCodeBc.value)
 		partitionedRoleRDD.persist()
@@ -117,10 +116,10 @@ object Ripper {
 		/**
 		 * Personal
 		 */
-		val personalRDD = partitionedRoleRDD.mapValues(_._1).filter(_._2.size >0)
+		val personalRDD = partitionedRoleRDD.mapValues(_._1).filter(_._2 != None).mapValues(_.get)
 			.persist()
 		// LogHelper.log(personalRDD.first, "personalRDD")
-		// LogHelper.log(personalRDD.count, "personalRDD count")
+		LogHelper.log(personalRDD.count, "personalRDD count")
 		val roleGradeRDD = personalRDD.map(currySplit(upgradeCode, gradeIndex)(_))
 			.filter(_ != None).map(_.get)
 			.flatMap(x => x)
@@ -232,9 +231,13 @@ object Ripper {
 				val personal = seqs.zipWithIndex.filter{ case (_, index) => 
 					pairBuf.forall{ case (start, end, _) => index > end || index < start}
 				}.map(_._1)
-				(personal, Some(team))
+				if (!pairBuf.isEmpty) {
+					(Some(personal), Some(team))
+				} else {
+					(None, Some(team))
+				}
 			} else {
-				(seqs, None)
+				(Some(seqs), None)
 			}
   		}
   	}
