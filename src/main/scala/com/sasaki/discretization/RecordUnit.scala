@@ -13,23 +13,8 @@ class RecordUnit(val timestamp : Long,
 		s"$timestamp@$motionCode@$parameters"
 	}
 
-	def firstEnterMap : Boolean = {
-		motionCode == Ripper.enterMapCode && parameters.split("@").head.trim == "1"
-	}
-
 	def codeMatch(code : String) : Boolean = {
 		code == motionCode
-	}
-
-	/**
-	 * Tell if code is matched as well as the mapid is contained
-	 */
-	def mapMatch(code : String, mapLookup : collection.Map[String, Long]) : Boolean = {
-		codeMatch(code) && mapLookup.contains(parameters.split(",,").last)
-	}
-
-	def withinScopePairs(pairs : IndexedSeq[(Long, Long)]) : Boolean = {
-		pairs.filter(x => timestamp >= x._1 && timestamp <= x._2).size > 0
 	}
 
 }
