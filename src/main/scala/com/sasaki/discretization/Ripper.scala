@@ -24,7 +24,7 @@ object Ripper {
 	val motionsLookupFile = "hdfs:///netease/ver2/operations-user"
 
 	// Write to
-	val personalDataHDFS = "hdfs:///netease/ver2/gen/2/personal/"
+	val levelDataHDFS = "hdfs:///netease/ver2/gen/2/level/"
 	val teamDataHDFS = "hdfs:///netease/ver2/gen/2/team/"
 	val codeCounterHDFS = "hdfs:///netease/ver2/gen/2/code-counter/"
 	val mapCounterHDFS = "hdfs:///netease/ver2/gen/2/map-counter/"
@@ -34,7 +34,7 @@ object Ripper {
 	val lookupFilePartitions = 1
 	val teamMapCodePartitions = 20
 	val codeCounterPartitions = 1
-	val gradeIndex = 2
+	val levelIndex = 2
 	val mapIndex = 13
 	val upgradeCode = "5300125"
 
@@ -67,7 +67,7 @@ object Ripper {
 		/**
 		 * Summarize 3 exception types of role's extraction.
 		 */
-		ClosureFunc.roleInvaldAnalysis(lineRDD, invalidDataHDFS)
+		// ClosureFunc.roleInvaldAnalysis(lineRDD, invalidDataHDFS)
 		
 		/**
 		 * Exclude the bad records and repack them as RecordUnit
@@ -82,7 +82,7 @@ object Ripper {
 		 * Count each motion and save
 		 */
 		val codeCounter = validLineRDD.map(_._2.motionCode).countByValue.toList.sortBy(-_._2)
-		sc.parallelize(codeCounter, codeCounterPartitions).saveAsTextFile(codeCounterHDFS)
+		// sc.parallelize(codeCounter, codeCounterPartitions).saveAsTextFile(codeCounterHDFS)
 		 
 		/**
 		 * Pack the RecordUnit of one role into a seq and sort it by time.
@@ -114,17 +114,27 @@ object Ripper {
 		/**
 		 * Personal
 		 */
-		val personalRDD = partitionedRoleRDD.mapValues(_._1).filter(_._2 != None).mapValues(_.get)
-			.persist()
+		// val personalRDD = partitionedRoleRDD.mapValues(_._1).filter(_._2 != None).mapValues(_.get)
+		// personalRDD.persist()
 		// LogHelper.log(personalRDD.first, "personalRDD")
-		LogHelper.log(personalRDD.count, "personalRDD count")
-		val roleGradeRDD = personalRDD.map(ClosureFunc.currySplit(upgradeCode, gradeIndex)(_))
+		// LogHelper.log(personalRDD.count, "personalRDD count")
+		// val roleLevelRDD = personalRDD.map(ClosureFunc.currySplit(upgradeCode, levelIndex)(_))
+		// 	.filter(_ != None).map(_.get)
+		// 	.flatMap(x => x)
+		// 	.persist()
+		// personalRDD.unpersist()
+		// LogHelper.log(roleLevelRDD.first, "roleLevelRDD")
+		// LogHelper.log(roleLevelRDD.count, "roleLevelRDD count")
+
+		/**
+		 * Level. At least upgrade 2 levels are considered.
+		 */
+		 val roleLevelRDD = roleRDD.map(ClosureFunc.currySplit(upgradeCode, levelIndex)(_))
 			.filter(_ != None).map(_.get)
 			.flatMap(x => x)
 			.persist()
-		personalRDD.unpersist()
-		// LogHelper.log(roleGradeRDD.first, "roleGradeRDD")
-		LogHelper.log(roleGradeRDD.count, "roleGradeRDD count")
+		// LogHelper.log(roleLevelRDD.first, "roleLevelRDD")
+		LogHelper.log(roleLevelRDD.count, "roleLevelRDD count")
 
 		/**
 		 * Team
@@ -135,7 +145,7 @@ object Ripper {
 		// LogHelper.log(roleGroupRDD.first, "roleGroupRDD")
 		LogHelper.log(roleGroupRDD.count, "roleGroupRDD count")
 
-		StoreFormat.saveAsJSON(roleGradeRDD, personalDataHDFS, sqlContext)
+		StoreFormat.saveAsJSON(roleLevelRDD, levelDataHDFS, sqlContext)
 		StoreFormat.saveAsJSON(roleGroupRDD, teamDataHDFS, sqlContext)
     		sc.stop()
   	}

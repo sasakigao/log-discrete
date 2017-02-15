@@ -21,7 +21,7 @@ object ClosureFunc {
   	 * A curry function which relies on code and param index for splitting.
   	 */
   	def currySplit(targetEventCode : String, paramIndex : Int)
-  			(roleInfo : (String, scala.Seq[RecordUnit])) = {
+  			(roleInfo : (String, Seq[RecordUnit])) = {
   		val (role, seqs) = roleInfo
   		val splitIndex = (0 until seqs.size).filter(x => seqs(x).codeMatch(targetEventCode))
 		// only those appear more than once are considered
@@ -47,8 +47,8 @@ object ClosureFunc {
 		LogHelper.log(roleDependentInvalidRDD.count, "roleDependentInvalidRDD count")
 		LogHelper.log(roleUnexpectedRDD.count, "roleUnexpectedRDD count")
 		roleUnexpectedRDD.takeSample(false, 100, 11L).foreach(LogHelper.log(_, "roleUnexpectedRDD 100"))
-		roleDependentInvalidRDD.coalesce(10, false).saveAsTextFile(invalidDataHDFS + "role-dep/")
-		roleUnexpectedRDD.coalesce(10, false).saveAsTextFile(invalidDataHDFS + "role-unexp/")
+		// roleDependentInvalidRDD.coalesce(10, false).saveAsTextFile(invalidDataHDFS + "role-dep/")
+		// roleUnexpectedRDD.coalesce(10, false).saveAsTextFile(invalidDataHDFS + "role-unexp/")
   	}
 
   	def eitherExtract(rawDatum : RDD[String], opeLookup : Broadcast[Map[String, Seq[Int]]]) ={
@@ -102,7 +102,8 @@ object ClosureFunc {
 				}
 			}
 			if (!pairBuf.isEmpty) {
-				val team = pairBuf.map{ case (start, end, id) => (id, seqs.slice(start, end + 1))}.toSeq
+				val team = pairBuf.map{ case (start, end, id) => (id, seqs.slice(start, end + 1).map(_.toString))}
+					.toSeq
 				val personal = seqs.zipWithIndex.filter{ case (_, index) => 
 					pairBuf.forall{ case (start, end, _) => index > end || index < start}
 				}.map(_._1)
